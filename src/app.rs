@@ -130,7 +130,9 @@ impl PvzApp {
 
             thread::spawn(move || {
                 let ocr = OcrEngine::new();
-                let mut last_text = String::new();
+                let mut last_processed_text = String::new();
+                let mut candidate_text = String::new();
+                let mut candidate_count = 0;
                 
                 loop {
                     if let Ok(stop) = stop_signal.lock() {
@@ -140,9 +142,18 @@ impl PvzApp {
                     if let Some(r) = config.region {
                         if let Some(img) = capture::capture_region(r[0], r[1], r[2], r[3]) {
                             let text = ocr.process_image(img);
-                            if !text.is_empty() && text != last_text {
-                                if text.chars().all(|c| c.is_digit(10)) {
-                                    last_text = text.clone();
+                            
+                            if !text.is_empty() && text.chars().all(|c| c.is_digit(10)) {
+                                if text == candidate_text {
+                                    candidate_count += 1;
+                                } else {
+                                    candidate_text = text.clone();
+                                    candidate_count = 1;
+                                }
+
+                                // If text is stable for 2 consecutive frames
+                                if candidate_count >= 2 && text != last_processed_text {
+                                    last_processed_text = text.clone();
                                     tx.send(AppMessage::TextDetected(text.clone())).ok();
                                     tx.send(AppMessage::Log(format!("🔍 Распознано: {}", text))).ok();
                                     
@@ -156,12 +167,15 @@ impl PvzApp {
                                         tx.send(AppMessage::Log(format!("ℹ Пропуск печати (отключено): {}", text))).ok();
                                     }
                                 }
+                            } else {
+                                candidate_count = 0;
+                                candidate_text.clear();
                             }
                         }
                     }
                     
                     ctx_clone.request_repaint();
-                    thread::sleep(Duration::from_millis(500));
+                    thread::sleep(Duration::from_millis(200));
                 }
                 tx.send(AppMessage::Status(false)).ok();
                 ctx_clone.request_repaint();

@@ -2,7 +2,7 @@ use windows::{
     Graphics::Imaging::*,
     Storage::Streams::*,
 };
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use std::io::Cursor;
 
 pub struct OcrEngine {
@@ -21,10 +21,20 @@ impl OcrEngine {
             None => return String::new(),
         };
 
-        // 1. Convert RgbaImage to SoftwareBitmap via Stream
+        // 1. Preprocess: Convert to grayscale and Upscale
+        let mut img = DynamicImage::ImageRgba8(img);
+        
+        // Convert to grayscale to reduce noise
+        let gray = img.grayscale();
+        
+        // Upscale (2x) using Lanczos3 filter for high quality
+        let (w, h) = gray.dimensions();
+        let upscaled = gray.resize(w * 2, h * 2, FilterType::Lanczos3);
+
+        // 2. Convert to SoftwareBitmap via Stream (BMP format)
         let mut buf = Vec::new();
         let mut cursor = Cursor::new(&mut buf);
-        DynamicImage::ImageRgba8(img).write_to(&mut cursor, image::ImageOutputFormat::Bmp).ok();
+        upscaled.write_to(&mut cursor, image::ImageOutputFormat::Bmp).ok();
         
         let stream = InMemoryRandomAccessStream::new().unwrap();
         let writer = DataWriter::CreateDataWriter(&stream).unwrap();
