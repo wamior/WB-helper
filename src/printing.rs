@@ -320,7 +320,7 @@ pub fn print_label(printer_name: &str, text: &str, width_mm: f64, height_mm: f64
             // For 180° rotations, we need to transform the coordinate system
             SetGraphicsMode(hdc, GM_ADVANCED);
             
-            let mut xform = XFORM {
+            let xform = XFORM {
                 eM11: -1.0,
                 eM12: 0.0,
                 eM21: 0.0,

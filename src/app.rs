@@ -1,4 +1,6 @@
 use eframe::egui;
+use obfstr::obfstr;
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -57,10 +59,8 @@ impl PvzApp {
         
         // Spawn update check
         thread::spawn(move || {
-            // Placeholder: Change this to your real server URL!
-            let update_url = "https://pvz.wax1nay.ru/version.json"; 
-            
-            if let Ok(info) = updater::check_for_updates(update_url) {
+            // Use obfuscated string directly in the call
+            if let Ok(info) = updater::check_for_updates(obfstr!("https://pvz.wax1nay.ru/version.json")) {
                 if info.current_version != info.latest_version {
                     if let Some(url) = info.download_url {
                         tx_clone.send(AppMessage::Log(format!("🚀 Найдено обязательное обновление: {} -> {}. Установка...", info.current_version, info.latest_version))).ok();

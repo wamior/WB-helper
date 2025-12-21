@@ -5,11 +5,15 @@ mod ocr;
 mod printing;
 mod capture;
 mod updater;
+mod security;
+
 
 // We'll rename it to main.rs later or use it as main entry
 // Actually eframe requires main.
 fn main() -> eframe::Result<()> {
+    security::anti_debug_check();
     updater::cleanup_old_executables();
+
     // Log functionality if needed, for now just print to stdout
     
     let native_options = eframe::NativeOptions {
