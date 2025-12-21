@@ -41,6 +41,60 @@ pub struct PRINTER_INFO_2W {
     pub AveragePPM: u32,
 }
 
+// DEVMODE structure for printer configuration
+#[repr(C)]
+#[allow(non_snake_case)]
+#[derive(Clone, Copy)]
+pub struct DEVMODEW {
+    pub dmDeviceName: [u16; 32],
+    pub dmSpecVersion: u16,
+    pub dmDriverVersion: u16,
+    pub dmSize: u16,
+    pub dmDriverExtra: u16,
+    pub dmFields: u32,
+    pub dmOrientation: i16,
+    pub dmPaperSize: i16,
+    pub dmPaperLength: i16,
+    pub dmPaperWidth: i16,
+    pub dmScale: i16,
+    pub dmCopies: i16,
+    pub dmDefaultSource: i16,
+    pub dmPrintQuality: i16,
+    pub dmColor: i16,
+    pub dmDuplex: i16,
+    pub dmYResolution: i16,
+    pub dmTTOption: i16,
+    pub dmCollate: i16,
+    pub dmFormName: [u16; 32],
+    pub dmLogPixels: u16,
+    pub dmBitsPerPel: u32,
+    pub dmPelsWidth: u32,
+    pub dmPelsHeight: u32,
+    pub dmDisplayFlags: u32,
+    pub dmDisplayFrequency: u32,
+    pub dmICMMethod: u32,
+    pub dmICMIntent: u32,
+    pub dmMediaType: u32,
+    pub dmDitherType: u32,
+    pub dmReserved1: u32,
+    pub dmReserved2: u32,
+    pub dmPanningWidth: u32,
+    pub dmPanningHeight: u32,
+}
+
+// DEVMODE field constants
+const DM_ORIENTATION: u32 = 0x00000001;
+const DM_PAPERSIZE: u32 = 0x00000002;
+const DM_PAPERLENGTH: u32 = 0x00000004;
+const DM_PAPERWIDTH: u32 = 0x00000008;
+
+// Paper size constants
+const DMPAPER_USER: i16 = 256;
+
+// Orientation constants
+const DMORIENT_PORTRAIT: i16 = 1;
+const DMORIENT_LANDSCAPE: i16 = 2;
+
 #[link(name = "gdi32")]
 extern "system" {
     pub fn StartDocW(hdc: HDC, lpdi: *const DOCINFOW_MANUAL) -> i32;
@@ -60,10 +114,31 @@ extern "system" {
         pcb_needed: *mut u32,
         pc_returned: *mut u32,
     ) -> BOOL;
+    
+    pub fn OpenPrinterW(
+        pPrinterName: PCWSTR,
+        phPrinter: *mut HANDLE,
+        pDefault: *mut std::ffi::c_void,
+    ) -> BOOL;
+    
+    pub fn ClosePrinter(hPrinter: HANDLE) -> BOOL;
+    
+    pub fn DocumentPropertiesW(
+        hWnd: HWND,
+        hPrinter: HANDLE,
+        pDeviceName: PCWSTR,
+        pDevModeOutput: *mut DEVMODEW,
+        pDevModeInput: *const DEVMODEW,
+        fMode: u32,
+    ) -> i32;
 }
 
 const PRINTER_ENUM_LOCAL: u32 = 0x00000002;
 const PRINTER_ENUM_CONNECTIONS: u32 = 0x00000004;
+
+// DocumentProperties mode flags
+const DM_OUT_BUFFER: u32 = 2;
+const DM_IN_BUFFER: u32 = 8;
 
 pub fn get_printers() -> Vec<String> {
     let mut printers = Vec::new();
@@ -105,7 +180,7 @@ pub fn get_printers() -> Vec<String> {
     printers
 }
 
-pub fn print_label(printer_name: &str, text: &str, width_mm: f64, height_mm: f64) -> anyhow::Result<()> {
+pub fn print_label(printer_name: &str, text: &str, width_mm: f64, height_mm: f64, orientation: u8) -> anyhow::Result<()> {
     unsafe {
         let device_name_u16: Vec<u16> = if printer_name.is_empty() {
              return Err(anyhow::anyhow!("Printer name not specified"));
@@ -113,13 +188,99 @@ pub fn print_label(printer_name: &str, text: &str, width_mm: f64, height_mm: f64
              printer_name.encode_utf16().chain(Some(0)).collect()
         };
         
+        // Open printer to get handle
+        let mut h_printer = HANDLE::default();
+        if !OpenPrinterW(
+            PCWSTR(device_name_u16.as_ptr()),
+            &mut h_printer,
+            std::ptr::null_mut()
+        ).as_bool() {
+            return Err(anyhow::anyhow!("Failed to open printer: {}", printer_name));
+        }
+        
+        // Get size of DEVMODE needed
+        let size = DocumentPropertiesW(
+            HWND::default(),
+            h_printer,
+            PCWSTR(device_name_u16.as_ptr()),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            0
+        );
+        
+        if size <= 0 {
+            ClosePrinter(h_printer);
+            return Err(anyhow::anyhow!("Failed to get DEVMODE size"));
+        }
+        
+        // Allocate buffer for DEVMODE
+        let mut buffer = vec![0u8; size as usize];
+        let devmode_ptr = buffer.as_mut_ptr() as *mut DEVMODEW;
+        
+        // Get printer's default DEVMODE
+        if DocumentPropertiesW(
+            HWND::default(),
+            h_printer,
+            PCWSTR(device_name_u16.as_ptr()),
+            devmode_ptr,
+            std::ptr::null(),
+            DM_OUT_BUFFER
+        ) < 0 {
+            ClosePrinter(h_printer);
+            return Err(anyhow::anyhow!("Failed to get printer DEVMODE"));
+        }
+        
+        // Modify DEVMODE with our settings
+        let devmode = &mut *devmode_ptr;
+        
+        // Set fields that we're modifying
+        devmode.dmFields |= DM_PAPERSIZE | DM_PAPERLENGTH | DM_PAPERWIDTH | DM_ORIENTATION;
+        
+        // Set custom paper size
+        devmode.dmPaperSize = DMPAPER_USER;
+        
+        // Convert mm to 0.1mm units (tenths of a millimeter)
+        // For landscape orientations, swap width and height in DEVMODE
+        let (devmode_width, devmode_height) = if orientation == 1 || orientation == 3 {
+            // Landscape: swap dimensions
+            ((height_mm * 10.0) as i16, (width_mm * 10.0) as i16)
+        } else {
+            // Portrait: keep as is
+            ((width_mm * 10.0) as i16, (height_mm * 10.0) as i16)
+        };
+        
+        devmode.dmPaperWidth = devmode_width;
+        devmode.dmPaperLength = devmode_height;
+        
+        // Set orientation (Windows only understands Portrait/Landscape, not 180° rotations)
+        devmode.dmOrientation = if orientation == 1 || orientation == 3 {
+            DMORIENT_LANDSCAPE
+        } else {
+            DMORIENT_PORTRAIT
+        };
+        
+        // Apply the modified DEVMODE back to the printer
+        if DocumentPropertiesW(
+            HWND::default(),
+            h_printer,
+            PCWSTR(device_name_u16.as_ptr()),
+            devmode_ptr,
+            devmode_ptr,
+            DM_IN_BUFFER | DM_OUT_BUFFER
+        ) < 0 {
+            ClosePrinter(h_printer);
+            return Err(anyhow::anyhow!("Failed to apply DEVMODE settings"));
+        }
+        
+        ClosePrinter(h_printer);
+        
         let driver = "WINSPOOL\0".encode_utf16().collect::<Vec<u16>>();
 
         let hdc = CreateDCW(
             PCWSTR(driver.as_ptr()), 
             PCWSTR(device_name_u16.as_ptr()), 
             PCWSTR::null(), 
-            None
+            Some(devmode_ptr as *const _)
         );
         
         if hdc.is_invalid() {
@@ -150,8 +311,25 @@ pub fn print_label(printer_name: &str, text: &str, width_mm: f64, height_mm: f64
         let dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
         let dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
         
+        // Calculate target dimensions based on original width/height (not swapped)
         let target_w_px = (width_mm / 25.4 * dpi_x as f64) as i32;
         let target_h_px = (height_mm / 25.4 * dpi_y as f64) as i32;
+        
+        // Apply 180° rotation if needed
+        if orientation == 2 || orientation == 3 {
+            // For 180° rotations, we need to transform the coordinate system
+            SetGraphicsMode(hdc, GM_ADVANCED);
+            
+            let mut xform = XFORM {
+                eM11: -1.0,
+                eM12: 0.0,
+                eM21: 0.0,
+                eM22: -1.0,
+                eDx: target_w_px as f32,
+                eDy: target_h_px as f32,
+            };
+            SetWorldTransform(hdc, &xform);
+        }
         
         let margin_x = (target_w_px as f64 * 0.05) as i32;
         let margin_y = (target_h_px as f64 * 0.05) as i32;

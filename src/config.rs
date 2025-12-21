@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub label_height_mm: f64,
     pub region: Option<[i32; 4]>, // x, y, w, h
     pub print_enabled: bool,
+    pub print_orientation: u8, // 0=Portrait, 1=Landscape, 2=Portrait 180°, 3=Landscape 180°
 }
 
 impl Default for AppConfig {
@@ -19,6 +20,7 @@ impl Default for AppConfig {
             label_height_mm: 38.1,
             region: None,
             print_enabled: true,
+            print_orientation: 0, // Default: Portrait
         }
     }
 }

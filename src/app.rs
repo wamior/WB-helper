@@ -147,7 +147,7 @@ impl PvzApp {
                                     tx.send(AppMessage::Log(format!("🔍 Распознано: {}", text))).ok();
                                     
                                     if config.print_enabled {
-                                        if let Err(e) = printing::print_label(&config.printer_name, &text, config.label_width_mm, config.label_height_mm) {
+                                        if let Err(e) = printing::print_label(&config.printer_name, &text, config.label_width_mm, config.label_height_mm, config.print_orientation) {
                                              tx.send(AppMessage::Log(format!("❌ Ошибка печати: {}", e))).ok();
                                         } else {
                                              tx.send(AppMessage::Log(format!("🖨 Напечатано: {}", text))).ok();
@@ -239,7 +239,7 @@ impl eframe::App for PvzApp {
 
                     ui.centered_and_justified(|ui| {
                         if self.selection_start.is_none() {
-                            ui.label(egui::RichText::new("ВЫДЕЛИТЕ ОБЛАСТЬ").size(32.0).strong().color(egui::Color32::WHITE).raised());
+                            ui.label(egui::RichText::new("ВЫДЕЛИТЕ ОБЛАСТЬ").size(16.0).strong().color(egui::Color32::WHITE).raised());
                         }
                     });
                 });
@@ -279,10 +279,35 @@ impl eframe::App for PvzApp {
                         }
 
                         ui.add_space(10.0);
-                        ui.label("Этикетка (мм):");
                         ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut self.config.label_width_mm).speed(0.1).suffix(" w"));
-                            ui.add(egui::DragValue::new(&mut self.config.label_height_mm).speed(0.1).suffix(" h"));
+                            ui.vertical(|ui| {
+                                ui.label("Этикетка (мм):");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut self.config.label_width_mm).speed(0.1).suffix(" w"));
+                                    ui.add(egui::DragValue::new(&mut self.config.label_height_mm).speed(0.1).suffix(" h"));
+                                });
+                            });
+                            
+                            ui.add_space(10.0);
+                            
+                            ui.vertical(|ui| {
+                                ui.label("Ориентация:");
+                                let orientation_text = match self.config.print_orientation {
+                                    0 => "Книжная",
+                                    1 => "Альбомная",
+                                    2 => "Книжная 180°",
+                                    3 => "Альбомная 180°",
+                                    _ => "Книжная",
+                                };
+                                egui::ComboBox::from_id_salt("orientation_cb")
+                                    .selected_text(orientation_text)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.config.print_orientation, 0, "Книжная");
+                                        ui.selectable_value(&mut self.config.print_orientation, 1, "Альбомная");
+                                        ui.selectable_value(&mut self.config.print_orientation, 2, "Книжная 180°");
+                                        ui.selectable_value(&mut self.config.print_orientation, 3, "Альбомная 180°");
+                                    });
+                            });
                         });
 
                         ui.add_space(10.0);
