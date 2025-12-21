@@ -8,7 +8,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use crate::config::{AppConfig, ConfigManager};
 use crate::printing;
 use crate::capture;
-use crate::ocr::OcrEngine;
+use crate::audio::AudioEngine;
 
 use crate::updater;
 
@@ -32,14 +32,8 @@ pub struct PvzApp {
     rx: Receiver<AppMessage>,
     tx: Sender<AppMessage>,
     
-    // Printer State
-    printers: Vec<String>,
-    
-    // Overlay State
-    is_selecting_region: bool,
-    selection_bg: Option<egui::TextureHandle>,
-    selection_start: Option<egui::Pos2>,
-    selection_curr: Option<egui::Pos2>,
+    // Audio State
+    audio_engine: Option<AudioEngine>,
 }
 
 impl PvzApp {
@@ -79,6 +73,10 @@ impl PvzApp {
         });
 
         let printers = printing::get_printers();
+        let audio_engine = AudioEngine::new();
+        if audio_engine.is_none() {
+            tx.send(AppMessage::Log("⚠ Папка 'model' не найдена. Распознавание голоса отключено.".to_string())).ok();
+        }
         
         Self {
             config_manager: cm,
@@ -89,11 +87,7 @@ impl PvzApp {
             stop_signal: Arc::new(Mutex::new(false)),
             rx,
             tx,
-            printers,
-            is_selecting_region: false,
-            selection_bg: None,
-            selection_start: None,
-            selection_curr: None,
+            audio_engine,
         }
     }
     
@@ -122,64 +116,13 @@ impl PvzApp {
                 *stop = false;
             }
             
-            let config = self.config.clone();
             let tx = self.tx.clone();
-            let ctx_clone = ctx.clone();
-
-            self.log("▶ Мониторинг запущен...");
-
-            thread::spawn(move || {
-                let ocr = OcrEngine::new();
-                let mut last_processed_text = String::new();
-                let mut candidate_text = String::new();
-                let mut candidate_count = 0;
-                
-                loop {
-                    if let Ok(stop) = stop_signal.lock() {
-                        if *stop { break; }
-                    }
-                    
-                    if let Some(r) = config.region {
-                        if let Some(img) = capture::capture_region(r[0], r[1], r[2], r[3]) {
-                            let text = ocr.process_image(img);
-                            
-                            if !text.is_empty() && text.chars().all(|c| c.is_digit(10)) {
-                                if text == candidate_text {
-                                    candidate_count += 1;
-                                } else {
-                                    candidate_text = text.clone();
-                                    candidate_count = 1;
-                                }
-
-                                // If text is stable for 2 consecutive frames
-                                if candidate_count >= 2 && text != last_processed_text {
-                                    last_processed_text = text.clone();
-                                    tx.send(AppMessage::TextDetected(text.clone())).ok();
-                                    tx.send(AppMessage::Log(format!("🔍 Распознано: {}", text))).ok();
-                                    
-                                    if config.print_enabled {
-                                        if let Err(e) = printing::print_label(&config.printer_name, &text, config.label_width_mm, config.label_height_mm, config.print_orientation) {
-                                             tx.send(AppMessage::Log(format!("❌ Ошибка печати: {}", e))).ok();
-                                        } else {
-                                             tx.send(AppMessage::Log(format!("🖨 Напечатано: {}", text))).ok();
-                                        }
-                                    } else {
-                                        tx.send(AppMessage::Log(format!("ℹ Пропуск печати (отключено): {}", text))).ok();
-                                    }
-                                }
-                            } else {
-                                candidate_count = 0;
-                                candidate_text.clear();
-                            }
-                        }
-                    }
-                    
-                    ctx_clone.request_repaint();
-                    thread::sleep(Duration::from_millis(200));
-                }
-                tx.send(AppMessage::Status(false)).ok();
-                ctx_clone.request_repaint();
-            });
+            if let Some(engine) = &self.audio_engine {
+                engine.start_monitoring(tx, stop_signal, self.config.clone());
+            } else {
+                self.log("❌ Ошибка: Движок аудио не инициализирован (проверьте папку 'model')");
+                self.is_running = false;
+            }
         }
     }
 }
@@ -345,18 +288,35 @@ impl eframe::App for PvzApp {
                     ui.add_space(10.0);
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(egui::RichText::new("🖨 Управление печатью").strong());
                         ui.add_space(5.0);
+                        
                         let (p_text, p_color) = if self.config.print_enabled {
                             ("ПЕЧАТЬ: ВКЛ", egui::Color32::from_rgb(50, 150, 50))
                         } else {
                             ("ПЕЧАТЬ: ВЫКЛ", egui::Color32::from_rgb(200, 100, 50))
                         };
+                        
                         if ui.add_sized(
                             [ui.available_width(), 40.0], 
                             egui::Button::new(egui::RichText::new(p_text).strong().color(egui::Color32::WHITE)).fill(p_color)
                         ).clicked() {
                             self.config.print_enabled = !self.config.print_enabled;
+                            self.config_manager.save(&self.config).ok();
+                        }
+                        
+                        ui.add_space(8.0);
+                        
+                        let (d_text, d_color) = if self.config.debug_mode {
+                            ("🐞 ОТЛАДКА: ВКЛ", egui::Color32::from_rgb(180, 150, 50))
+                        } else {
+                            ("🐞 ОТЛАДКА: ВЫКЛ", egui::Color32::from_rgb(100, 100, 100))
+                        };
+                        
+                        if ui.add_sized(
+                            [ui.available_width(), 30.0],
+                            egui::Button::new(egui::RichText::new(d_text).strong().color(egui::Color32::WHITE)).fill(d_color)
+                        ).clicked() {
+                            self.config.debug_mode = !self.config.debug_mode;
                             self.config_manager.save(&self.config).ok();
                         }
                     });

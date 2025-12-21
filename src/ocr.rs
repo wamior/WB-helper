@@ -15,7 +15,7 @@ impl OcrEngine {
         Self { engine }
     }
 
-    pub fn process_image(&self, img: image::RgbaImage) -> String {
+    pub fn process_image(&self, img: image::RgbaImage, debug: bool) -> String {
         let engine = match &self.engine {
             Some(e) => e,
             None => return String::new(),
@@ -30,6 +30,10 @@ impl OcrEngine {
         // Upscale (2x) using Lanczos3 filter for high quality
         let (w, h) = gray.dimensions();
         let upscaled = gray.resize(w * 2, h * 2, FilterType::Lanczos3);
+
+        if debug {
+            let _ = upscaled.save("debug_ocr.png");
+        }
 
         // 2. Convert to SoftwareBitmap via Stream (BMP format)
         let mut buf = Vec::new();

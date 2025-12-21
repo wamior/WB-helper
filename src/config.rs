@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub region: Option<[i32; 4]>, // x, y, w, h
     pub print_enabled: bool,
     pub print_orientation: u8, // 0=Portrait, 1=Landscape, 2=Portrait 180°, 3=Landscape 180°
+    pub debug_mode: bool,
 }
 
 impl Default for AppConfig {
@@ -21,6 +22,7 @@ impl Default for AppConfig {
             region: None,
             print_enabled: true,
             print_orientation: 0, // Default: Portrait
+            debug_mode: false,
         }
     }
 }
