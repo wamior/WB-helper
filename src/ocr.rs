@@ -22,7 +22,7 @@ impl OcrEngine {
         };
 
         // 1. Preprocess: Convert to grayscale and Upscale
-        let mut img = DynamicImage::ImageRgba8(img);
+        let img = DynamicImage::ImageRgba8(img);
         
         // Convert to grayscale to reduce noise
         let gray = img.grayscale();

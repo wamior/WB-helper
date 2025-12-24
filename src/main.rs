@@ -6,6 +6,7 @@ mod printing;
 mod capture;
 mod updater;
 mod security;
+mod logger;
 
 
 // We'll rename it to main.rs later or use it as main entry

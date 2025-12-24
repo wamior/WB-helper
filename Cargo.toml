@@ -1,6 +1,7 @@
 [package]
 name = "pvzhelper"
-version = "0.2.6"
+version = "0.2.8"
+
 edition = "2021"
 
 [dependencies]
@@ -16,9 +17,7 @@ anyhow = "1.0"
 lazy_static = "1.4"
 chrono = "0.4"
 obfstr = "0.4"
-wasapi = "0.14"
-vosk = "0.3"
-hound = "3.5"
+
 
 
 [dependencies.windows]
